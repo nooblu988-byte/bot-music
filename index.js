@@ -110,7 +110,6 @@ function resolveThumbnail(info) {
 
 // ─── Container Builders ───────────────────────────────────────────────────────
 
-// FIX 1: Properly closed both addActionRowComponents chains
 function createNowPlayingContainer(player, track, disabled = false) {
  const info = track.info ?? {};
  const thumbnail = resolveThumbnail(info);
@@ -173,7 +172,7 @@ function createNowPlayingContainer(player, track, disabled = false) {
  .setDisabled(disabled)
  )
  )
- // Row 2: loop + autoplay — FIX: properly closed
+ // Row 2: loop + autoplay
  .addActionRowComponents(
  new ActionRowBuilder()
  .addComponents(
@@ -189,6 +188,7 @@ function createNowPlayingContainer(player, track, disabled = false) {
  new ButtonBuilder()
  .setCustomId('autoplay')
  .setLabel('Autoplay')
+ .setEmoji(autoplayEnabled.has(player.guildId) ? '✅' : '❌')
  .setStyle(
  autoplayEnabled.has(player.guildId)
  ? ButtonStyle.Success
@@ -201,7 +201,6 @@ function createNowPlayingContainer(player, track, disabled = false) {
  return container;
 }
 
-// FIX 2: Removed duplicate createSimpleContainerNoButtons; one function covers both usages
 function createSimpleContainer(title, description, emoji = config.emojis.info) {
  return new ContainerBuilder()
  .addSectionComponents(
@@ -248,6 +247,7 @@ function createQueueContainer(player) {
 
  description +=
  `\n\n**Loop:** ${(!player.loop || player.loop === 'none') ? 'off' : player.loop}` +
+ ` | **Autoplay:** ${autoplayEnabled.has(player.guildId) ? '✅ On' : '❌ Off'}` +
  ` | **Total:** ${queue.length + (current ? 1 : 0)} tracks`;
 
  return new ContainerBuilder()
@@ -299,7 +299,7 @@ function createHelpContainer() {
  const lavalinkStatus = isLavalinkConnected ? '🟢 Connected' : '🔴 Not Connected';
  const description =
  `A powerful music bot with high quality audio\n\n` +
- `**Total Commands:** 20\n**Prefix:** \`${config.prefix}\`\n**Lavalink:** ${lavalinkStatus}\nMade by **Unknownz**\n\n` +
+ `**Total Commands:** 20\n**Prefix:** \`${config.prefix}\`\n**Lavalink:** ${lavalinkStatus}\nMade by **Susmita OP**\n\n` +
  `**${config.emojis.music} Music Commands**\n` +
  `**play** (p) - Play a song\n` +
  `**pause** (pa) - Pause current song\n` +
@@ -321,7 +321,8 @@ function createHelpContainer() {
  `**ping** (latency) - Bot ping\n` +
  `**invite** (inv) - Invite link\n` +
  `**support** (server) - Support server\n` +
- `**help** (h, cmd) - This message`;
+ `**help** (h, cmd) - This message\n\n` +
+ `💡 **Tip:** Mention me and type \`join\` to join your voice channel!`;
 
  return new ContainerBuilder()
  .addSectionComponents(
@@ -355,20 +356,13 @@ function createHelpContainer() {
 
 // ─── Shared command logic (used by both slash and prefix) ─────────────────────
 
-/**
- * Try resolving a query across multiple search platforms in order.
- * Falls back to the next platform if the current one returns no tracks.
- * Order: ytmsearch → ytsearch → scsearch (SoundCloud)
- */
 async function resolveWithFallback(query, requesterId) {
- // If it's a direct URL, try resolving as-is first (no prefix needed)
  const isUrl = /^https?:\/\//i.test(query);
  if (isUrl) {
  const result = await riffy.resolve({ query, requester: requesterId });
  if (result && result.tracks && result.tracks.length > 0) return result;
  }
 
- // Search platforms to try in order
  const platforms = ['ytmsearch', 'ytsearch', 'scsearch'];
 
  for (const platform of platforms) {
@@ -385,7 +379,7 @@ async function resolveWithFallback(query, requesterId) {
  }
  }
 
- return null; // All platforms exhausted
+ return null;
 }
 
 async function handlePlay(guildId, voiceChannelId, textChannelId, query, requesterId, reply, editReply) {
@@ -403,7 +397,6 @@ async function handlePlay(guildId, voiceChannelId, textChannelId, query, request
  });
  }
 
- // Use multi-platform fallback instead of a single resolve call
  const resolve = await resolveWithFallback(query, requesterId);
 
  if (!resolve || !resolve.tracks.length) {
@@ -475,7 +468,6 @@ riffy.on('trackStart', async (player, track) => {
 riffy.on('queueEnd', async (player) => {
  const channel = client.channels.cache.get(player.textChannel);
 
- // Disable buttons on the last now-playing message
  const msg = nowPlayingMessages.get(player.guildId);
  if (msg && player.current) {
  try {
@@ -488,10 +480,9 @@ riffy.on('queueEnd', async (player) => {
  console.error('Failed to disable buttons:', err);
  }
  }
- // FIX 5: Always clean up the map entry to prevent memory leaks
  nowPlayingMessages.delete(player.guildId);
 
- // FIX 3: Better autoplay — search for a related but different track
+ // Autoplay: search for related track
  if (autoplayEnabled.has(player.guildId) && player.current) {
  try {
  const track = player.current;
@@ -505,7 +496,6 @@ riffy.on('queueEnd', async (player) => {
  const result = await riffy.resolve({ query, requester: track.info.requester });
 
  if (result && result.tracks && result.tracks.length > 0) {
- // Pick a random track from results (skip index 0 to avoid the same song)
  const candidates = result.tracks.filter(t => t.info.uri !== track.info.uri);
  const nextTrack = candidates.length > 0
  ? candidates[Math.floor(Math.random() * candidates.length)]
@@ -670,7 +660,6 @@ client.on('interactionCreate', async (interaction) => {
  const disabledContainer = createNowPlayingContainer(player, player.current, true);
  await interaction.message.edit({ components: [disabledContainer], flags: MessageFlags.IsPersistent | MessageFlags.IsComponentsV2 }).catch(() => {});
  }
- // FIX 5: Clean up map on stop
  nowPlayingMessages.delete(player.guildId);
  player.destroy();
  await interaction.reply({ content: `${config.emojis.stop} Stopped`, ephemeral: true });
@@ -793,7 +782,6 @@ client.on('interactionCreate', async (interaction) => {
  if (!member.voice.channel || member.voice.channel.id !== player.voiceChannel) {
  return interaction.reply({ content: `${config.emojis.error} You need to be in the same voice channel`, ephemeral: true });
  }
- // FIX 5: Clean up map on stop
  nowPlayingMessages.delete(guild.id);
  player.destroy();
  await interaction.reply({ components: [createSimpleContainer('Stopped', 'Stopped and cleared queue', config.emojis.stop)], flags: MessageFlags.IsComponentsV2 });
@@ -900,7 +888,6 @@ client.on('interactionCreate', async (interaction) => {
  if (from < 0 || from >= player.queue.length || to < 0 || to >= player.queue.length) {
  return interaction.reply({ content: `${config.emojis.error} Invalid positions`, ephemeral: true });
  }
- // FIX 4: Use Riffy-safe queue manipulation instead of .splice()
  const queueArray = [...player.queue];
  const [track] = queueArray.splice(from, 1);
  queueArray.splice(to, 0, track);
@@ -1014,6 +1001,33 @@ client.on('interactionCreate', async (interaction) => {
 if (config.enablePrefix) {
  client.on('messageCreate', async (message) => {
  if (message.author.bot || !message.guild) return;
+
+ // ── @Bot mention + "join" feature ───────────────────────────────────────
+ const botMention = `<@${client.user.id}>`;
+ const botMentionNick = `<@!${client.user.id}>`;
+ const content = message.content.trim();
+
+ if ((content.startsWith(botMention) || content.startsWith(botMentionNick)) && content.replace(botMention, '').replace(botMentionNick, '').trim().toLowerCase() === 'join') {
+ if (!message.member.voice.channel) {
+ return message.reply(`${config.emojis.error} You need to be in a voice channel first!`);
+ }
+ let player = riffy.players.get(message.guild.id);
+ if (!player) {
+ player = riffy.createConnection({
+ guildId: message.guild.id,
+ voiceChannel: message.member.voice.channel.id,
+ textChannel: message.channel.id,
+ deaf: true
+ });
+ }
+ const container = createSimpleContainer(
+ 'Joined Voice Channel',
+ `Connected to **${message.member.voice.channel.name}** 🎤`,
+ config.emojis.success
+ );
+ return message.reply({ components: [container], flags: MessageFlags.IsComponentsV2 });
+ }
+
  if (!message.content.startsWith(config.prefix)) return;
 
  const args = message.content.slice(config.prefix.length).trim().split(/ +/);
@@ -1031,8 +1045,6 @@ if (config.enablePrefix) {
 
  const sent = await message.reply('🔍 Searching...');
 
- // For prefix: edit the "Searching..." message instead of replying again.
- // Strip IsPersistent from flags — Message.edit() does not support it.
  const prefixEditReply = async (data) => {
  if (typeof data === 'string') {
  return sent.edit({ content: data, components: [] });
@@ -1040,7 +1052,6 @@ if (config.enablePrefix) {
  return sent.edit({ content: '', components: data.components, flags: MessageFlags.IsComponentsV2 });
  };
 
- // Used only for early-exit errors (e.g. Lavalink down)
  const prefixReply = async (msg) => {
  if (typeof msg === 'string') return sent.edit({ content: msg, components: [] });
  return sent.edit({ content: '', components: msg.components ?? [], flags: MessageFlags.IsComponentsV2 });
